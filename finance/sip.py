@@ -43,9 +43,9 @@ def calculate(initial_monthly_investment: float,
     estimated_returns = future_value - total_invested
 
     return {
-        "Total Invested": round(total_invested, 2),
-        "Estimated Returns": round(estimated_returns, 2),
-        "Future Value": round(future_value, 2)
+        "Total Invested (₹)": round(total_invested, 2),
+        "Estimated Returns (₹)": round(estimated_returns, 2),
+        "Future Value (₹)": round(future_value, 2)
     }
 
 

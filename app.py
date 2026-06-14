@@ -8,14 +8,73 @@ Created on Wed Jun 10 21:45:26 2026
 
 
 import streamlit as st
+from streamlit import session_state as ss
 from calculators import CALCULATORS
 import pandas as pd
 import matplotlib.pyplot as plt
+import altair as alt
+
+
+if "current_cs" not in ss:
+    ss.current_cs = "$"
+
+
 
 
 # ---------------------------------------------------------------------
 # Helper functions for dynamic result visualisation
 # ---------------------------------------------------------------------
+
+
+def _format_numeric_display(value, config):
+    if isinstance(value, (int, float)):
+        label = config.get("label", "")
+
+        if "₹" in label or "amount" in label.lower():
+            if isinstance(value, int):
+                return f"{ss.current_cs}{value:,}"
+            return f"{ss.current_cs}{value:,.2f}"
+
+        if "%" in label or "rate" in label.lower() or "interest" in label.lower():
+            return f"{value:.2f}%"
+
+        if isinstance(value, int):
+            return f"{value:,}"
+
+        return f"{value:,.2f}"
+
+    return str(value)
+
+
+def _render_pie_chart(numeric_items):
+    df = pd.DataFrame({
+        "label": list(numeric_items.keys()),
+        "value": list(numeric_items.values())
+    })
+
+    chart = alt.Chart(df).mark_arc(innerRadius=70, stroke="#f8fafc", strokeWidth=2).encode(
+        theta=alt.Theta(field="value", type="quantitative"),
+        color=alt.Color(
+            "label:N",
+            scale=alt.Scale(range=["#1d4ed8", "#059669", "#f59e0b", "#ef4444", "#7c3aed", "#0ea5e9"]),
+            legend=alt.Legend(title=None, orient="right", labelFontSize=12)
+        ),
+        tooltip=[
+            alt.Tooltip("label:N", title="Category"),
+            alt.Tooltip("value:Q", title="Amount", format=",.2f")
+        ]
+    ).properties(width=360, height=360)
+
+    return chart.configure_view(strokeOpacity=0).configure_title(
+        fontSize=16,
+        anchor="start",
+        color="#0f172a"
+    ).configure_legend(
+        labelFontSize=12,
+        titleFontSize=0
+    )
+
+
 def _render_plain(result):
     """Fallback plain‑text rendering (unchanged from original logic)."""
     if isinstance(result, dict):
@@ -41,26 +100,66 @@ def render_result(result, viz_cfg=None):
     visualisation, the function gracefully falls back to the plain‑text
     representation.
     """
-    # -----------------------------------------------------------------
-    # No visualisation requested – use the original plain‑text output.
-    # -----------------------------------------------------------------
     if not viz_cfg:
+        if isinstance(result, dict):
+            numeric_items = {
+                key: value
+                for key, value in result.items()
+                if isinstance(value, (int, float))
+            }
+
+            if numeric_items and len(numeric_items) > 1:
+                # Try to create a meaningful pie chart: prefer Principal vs Interest (absolute amounts).
+                principal_key = next((k for k in result.keys() if "principal" in k.lower()), None)
+                total_payment_key = next((k for k in result.keys() if "total payment" in k.lower()), None)
+
+                pie_items = None
+
+                if principal_key and total_payment_key:
+                    try:
+                        principal_val = float(result[principal_key])
+                        total_payment_val = float(result[total_payment_key])
+                        interest_amount = max(0.0, total_payment_val - principal_val)
+                        pie_items = {"Principal": principal_val, "Interest": interest_amount}
+                    except Exception:
+                        pie_items = None
+
+                # Fallback: remove percentage and tiny/duplicated fields (like monthly EMI) from pie
+                if pie_items is None:
+                    pie_items = {
+                        k: v for k, v in numeric_items.items()
+                        if isinstance(v, (int, float)) and v > 0 and ("%" not in k) and ("emi" not in k.lower() and "monthly" not in k.lower())
+                    }
+
+                # If still empty, fall back to original numeric items
+                if not pie_items:
+                    pie_items = numeric_items
+
+                left, right = st.columns([2, 1])
+
+                with left:
+                    st.markdown("### Summary")
+                    for key, value in result.items():
+                        if isinstance(value, (int, float)):
+                            st.metric(label=key.replace('₹', ss.current_cs), value=_format_numeric_display(value, {"label": key}))
+                        else:
+                            st.write(f"**{key}:** {value}")
+
+                with right:
+                    if all(isinstance(v, (int, float)) and v >= 0 for v in pie_items.values()):
+                        st.altair_chart(_render_pie_chart(pie_items), use_container_width=True)
+                return
+
         _render_plain(result)
         return
 
     vtype = viz_cfg.get("type")
 
     try:
-        # -------------------------------------------------------------
-        # Metric – single scalar value
-        # -------------------------------------------------------------
         if vtype == "metric":
             label = viz_cfg.get("label", "Result")
             st.metric(label=label, value=result)
 
-        # -------------------------------------------------------------
-        # Pie chart – expects a dict where each entry contains a label and a value.
-        # -------------------------------------------------------------
         elif vtype == "pie" and isinstance(result, dict):
             label_key = viz_cfg.get("label_key")
             value_key = viz_cfg.get("value_key")
@@ -73,12 +172,8 @@ def render_result(result, viz_cfg=None):
             else:
                 _render_plain(result)
 
-        # -------------------------------------------------------------
-        # Bar / Line chart – expects a list of dicts (or a list of lists).
-        # -------------------------------------------------------------
         elif vtype in {"bar", "line"} and isinstance(result, list):
             df = pd.DataFrame(result)
-            # Allow the config to specify which column is the x‑axis.
             x_col = viz_cfg.get("x") or (
                 df.columns[0] if not df.empty else None)
             if x_col and x_col in df.columns:
@@ -88,9 +183,6 @@ def render_result(result, viz_cfg=None):
             else:
                 st.line_chart(df)
 
-        # -------------------------------------------------------------
-        # Dataframe – render any tabular data.
-        # -------------------------------------------------------------
         elif vtype == "dataframe":
             if isinstance(result, (list, dict)):
                 df = pd.DataFrame(result)
@@ -98,13 +190,20 @@ def render_result(result, viz_cfg=None):
             else:
                 _render_plain(result)
 
-        # -------------------------------------------------------------
-        # Unknown type – fall back.
-        # -------------------------------------------------------------
         else:
             _render_plain(result)
-    except Exception:  # pragma: no cover – any visualisation error should not break the UI
+    except Exception:
         _render_plain(result)
+
+
+def _sync_slider_to_number(state_key):
+    st.session_state[f"{state_key}_number"] = st.session_state[f"{state_key}_slider"]
+    st.session_state[f"{state_key}_last_changed"] = "slider"
+
+
+def _sync_number_to_slider(state_key):
+    st.session_state[f"{state_key}_slider"] = st.session_state[f"{state_key}_number"]
+    st.session_state[f"{state_key}_last_changed"] = "number"
 
 
 def render_numeric_input(
@@ -116,10 +215,20 @@ def render_numeric_input(
 
     caster = float if expected_type is float else int
 
-    value = caster(config["default"])
+    default_value = caster(config["default"])
 
-    if state_key in st.session_state:
-        value = caster(st.session_state[state_key])
+    slider_key = f"{state_key}_slider"
+    number_key = f"{state_key}_number"
+    last_key = f"{state_key}_last_changed"
+
+    if slider_key not in st.session_state:
+        st.session_state[slider_key] = default_value
+
+    if number_key not in st.session_state:
+        st.session_state[number_key] = default_value
+
+    if last_key not in st.session_state:
+        st.session_state[last_key] = "slider"
 
     slider_min = caster(config["slider_min"])
     slider_max = caster(config["slider_max"])
@@ -128,31 +237,42 @@ def render_numeric_input(
     col1, col2 = st.columns([4, 1])
 
     with col1:
-
-        slider_value = st.slider(
-            label,
+        st.slider(
+            label, 
             min_value=slider_min,
             max_value=slider_max,
-            value=value,
             step=step,
-            key=f"{state_key}_slider"
+            key=slider_key,
+            on_change=_sync_slider_to_number,
+            args=(state_key,)
         )
 
     with col2:
-
-        number_value = st.number_input(
-            "Exact",
-            min_value=slider_min,
-            max_value=slider_max,
-            value=slider_value,
-            step=step,
-            key=f"{state_key}_number",
-            label_visibility="collapsed"
+        st.markdown(
+            f"<div style='font-size:1.1rem; font-weight:600;'>"
+            f"{_format_numeric_display(st.session_state[slider_key], config)}"
+            f"</div>",
+            unsafe_allow_html=True
         )
+        st.caption("Current")
 
-    st.session_state[state_key] = caster(number_value)
+    st.number_input(
+        "Exact",
+        min_value=slider_min,
+        max_value=slider_max,
+        step=step,
+        key=number_key,
+        label_visibility="collapsed",
+        on_change=_sync_number_to_slider,
+        args=(state_key,)
+    )
 
-    return caster(number_value)
+    if st.session_state[last_key] == "number":
+        current_value = st.session_state[number_key]
+    else:
+        current_value = st.session_state[slider_key]
+
+    return caster(current_value)
 
 # ==================================================
 # Page Configuration
@@ -163,6 +283,51 @@ st.set_page_config(
     page_title="Compound",
     page_icon="📈",
     layout="wide"
+)
+
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    header {display: none !important;}
+    .css-1d391kg {padding-top: 0rem !important;}
+    .stApp {background: #eef2ff !important;}
+    .block-container {padding: 1.2rem 2rem !important; background: #eef2ff !important;}
+    .block-container h1,
+    .block-container h2,
+    .block-container h3,
+    .block-container h4,
+    .block-container h5,
+    .block-container h6,
+    .block-container p,
+    .block-container label,
+    .block-container {
+        color: #000000 !important;
+    }
+    .stMetric > div {
+        border-radius: 1rem !important;
+        padding: 1rem !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08) !important;
+    }
+    .stSlider > div {
+        background: #ffffff !important;
+        border-radius: 1rem !important;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06) !important;
+        padding: 1rem !important;
+    }
+    .streamlit-expanderHeader {
+        background: #ffffff !important;
+        border-radius: 1rem !important;
+        color: #000000 !important;
+    }
+    .css-1o9w0hw {background: #eff6ff !important;}
+    .css-1330x6k {color: #000000 !important;}
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -180,6 +345,21 @@ selected_calculator = st.sidebar.selectbox(
 tier = CALCULATORS[selected_calculator]
 
 st.title(selected_calculator)
+
+# Dictionary of major world currencies formatted as "Code (Name)":"Symbol"
+world_currencies = {
+    "USD (US Dollar)": "$", "EUR (Euro)": "€", "GBP (British Pound)": "£",
+    "JPY (Japanese Yen)": "¥", "INR (Indian Rupee)": "₹", "CNY (Chinese Yuan)": "¥",
+    "CAD (Canadian Dollar)": "$", "AUD (Australian Dollar)": "$", "CHF (Swiss Franc)": "CHF",
+    "BRL (Brazilian Real)": "R$", "RUB (Russian Ruble)": "₽", "MXN (Mexican Peso)": "$"
+}
+
+
+currency_symbol = world_currencies[st.sidebar.selectbox(
+    "Select Curency",
+    list(world_currencies.keys())
+)]
+ss.current_cs = currency_symbol
 
 
 # ==================================================
@@ -200,6 +380,7 @@ for idx, calculator in enumerate(tier.values()):
                 "label",
                 input_name.replace("_", " ").title()
             )
+            label = label.replace("₹", ss.current_cs)
 
             widget = config.get("widget", "number")
 

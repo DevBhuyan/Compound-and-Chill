@@ -26,16 +26,22 @@ def calculate(principal: float,
     total_months = tenure_years * 12
 
     if monthly_rate == 0:
-        return round(principal / total_months, 2)
+        emi = principal / total_months
+    else:
+        numerator = principal * monthly_rate * (
+            (1 + monthly_rate) ** total_months
+        )
+        denominator = ((1 + monthly_rate) ** total_months) - 1
+        emi = numerator / denominator
 
-    numerator = principal * monthly_rate * (
-        (1 + monthly_rate) ** total_months
-    )
-    denominator = ((1 + monthly_rate) ** total_months) - 1
-    emi = numerator / denominator
+    total_payment = emi * total_months
+    total_interest = (total_payment - principal)/principal * 100
 
     return {
-        "EMI": round(emi, 2)
+        "Monthly EMI (₹)": round(emi, 2),
+        "Principal Amount": round(principal, 2),
+        "Total Interest (%)": round(total_interest, 2),
+        "Total Payment (₹)": round(total_payment, 2)
     }
 
 

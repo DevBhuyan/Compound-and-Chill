@@ -1,4 +1,4 @@
-# Compound Calculator Dashboard
+# Compound Calculator [Dashboard](https://compound-calculator.streamlit.app/)
 
 A **Streamlit** based dashboard that aggregates a collection of financial calculators for compound interest, EMI, loan pre‑payment, SIP, and more.  Users can select a calculator from the sidebar, adjust parameters using sliders or precise number inputs, and instantly see the results.
 

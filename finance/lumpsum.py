@@ -89,7 +89,7 @@ def get_inputs():
         "compounding_frequency": {
             "label": "Compounding Frequency",
             "widget": "select",
-            "default": 12,
+            "default": 1,
             "allowed_values": [
                 1,
                 2,

@@ -36,11 +36,12 @@ def calculate(initial_monthly_investment: float,
 
         total_invested += current_monthly_investment
 
-        months_remaining = total_months - month + 1
-        future_value += current_monthly_investment * \
-            ((1 + monthly_rate) ** months_remaining)
+        # Put the money in and grow it by 1 month of interest
+        future_value += current_monthly_investment
+        future_value *= (1 + monthly_rate)
 
     estimated_returns = future_value - total_invested
+
 
     return {
         "Total Invested (₹)": round(total_invested, 2),

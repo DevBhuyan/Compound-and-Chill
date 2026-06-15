@@ -13,10 +13,14 @@ from calculators import CALCULATORS
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
+import os
 
+TAX_FILE = './cur_tax_rate.txt'
+if not os.path.exists(TAX_FILE):
+    open(TAX_FILE, 'w').write('0.18')
 
 if "current_cs" not in ss:
-    ss.current_cs = "$"
+    ss.current_cs = "₹"
 
 
 
@@ -27,21 +31,48 @@ if "current_cs" not in ss:
 
 
 def _format_numeric_display(value, config):
+    def format_commas(number: float, symbol: str) -> str:
+        if symbol != "₹":
+            return f"{number:,}"
+        s = str(number)
+
+        # Separate decimal logic instantly
+        if "." in s:
+            int_part, dec_part = s.split(".")
+            dec_part = "." + dec_part
+        else:
+            int_part, dec_part = s, ""
+
+        if len(int_part) <= 3:
+            return s
+
+        # Handle the standard 3-digit tail
+        last_three = int_part[-3:]
+        remaining = int_part[:-3]
+
+        # Fast step-backwards slicing by 2
+        chunks = []
+        for i in range(len(remaining), 0, -2):
+            chunks.append(remaining[max(0, i - 2) : i])
+
+        # Join using C-optimized string methods
+        return ",".join(reversed(chunks)) + "," + last_three + dec_part
+
     if isinstance(value, (int, float)):
         label = config.get("label", "")
 
         if "₹" in label or "amount" in label.lower():
             if isinstance(value, int):
-                return f"{ss.current_cs}{value:,}"
-            return f"{ss.current_cs}{value:,.2f}"
+                return f"{ss.current_cs}{format_commas(value, ss.current_cs)}"
+            return f"{ss.current_cs}{format_commas(round(value, 2), ss.current_cs)}"
 
         if "%" in label or "rate" in label.lower() or "interest" in label.lower():
             return f"{value:.2f}%"
 
         if isinstance(value, int):
-            return f"{value:,}"
+            return f"{format_commas(value, ss.current_cs)}"
 
-        return f"{value:,.2f}"
+        return f"{format_commas(round(value, 2), ss.current_cs)}"
 
     return str(value)
 
@@ -52,7 +83,7 @@ def _render_pie_chart(numeric_items):
         "value": list(numeric_items.values())
     })
 
-    chart = alt.Chart(df).mark_arc(innerRadius=70, stroke="#f8fafc", strokeWidth=2).encode(
+    chart = alt.Chart(df).mark_arc(innerRadius=0, stroke="#f8fafc", strokeWidth=2).encode(
         theta=alt.Theta(field="value", type="quantitative"),
         color=alt.Color(
             "label:N",
@@ -63,7 +94,7 @@ def _render_pie_chart(numeric_items):
             alt.Tooltip("label:N", title="Category"),
             alt.Tooltip("value:Q", title="Amount", format=",.2f")
         ]
-    ).properties(width=360, height=360)
+    ).properties(width=300, height=300)
 
     return chart.configure_view(strokeOpacity=0).configure_title(
         fontSize=16,
@@ -147,7 +178,7 @@ def render_result(result, viz_cfg=None):
 
                 with right:
                     if all(isinstance(v, (int, float)) and v >= 0 for v in pie_items.values()):
-                        st.altair_chart(_render_pie_chart(pie_items), use_container_width=True)
+                        st.altair_chart(_render_pie_chart(pie_items), use_container_width=False)
                 return
 
         _render_plain(result)
@@ -278,12 +309,16 @@ def render_numeric_input(
 # Page Configuration
 # ==================================================
 
+if 'sidebar_open' not in ss:
+    ss.sidebar_open = "expanded"
 
 st.set_page_config(
     page_title="Compound",
     page_icon="📈",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state='expanded'
 )
+
 
 st.markdown(
     """
@@ -292,8 +327,8 @@ st.markdown(
     footer {visibility: hidden !important;}
     header {display: none !important;}
     .css-1d391kg {padding-top: 0rem !important;}
-    .stApp {background: #eef2ff !important;}
-    .block-container {padding: 1.2rem 2rem !important; background: #eef2ff !important;}
+    .stApp {background: #000000 !important;}
+    .block-container {padding: 1.2rem 2rem !important; background: #000000 !important;}
     .block-container h1,
     .block-container h2,
     .block-container h3,
@@ -303,28 +338,28 @@ st.markdown(
     .block-container p,
     .block-container label,
     .block-container {
-        color: #000000 !important;
+        color: #ffffff !important;
     }
     .stMetric > div {
         border-radius: 1rem !important;
         padding: 1rem !important;
-        background: #ffffff !important;
-        color: #000000 !important;
+        background: rgb(15, 15, 15) !important;
+        color: #ffffff !important;
         box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08) !important;
     }
     .stSlider > div {
-        background: #ffffff !important;
+        background: rgb(15, 15, 15) !important;
         border-radius: 1rem !important;
         box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06) !important;
         padding: 1rem !important;
     }
     .streamlit-expanderHeader {
-        background: #ffffff !important;
+        background: rgb(15, 15, 15) !important;
         border-radius: 1rem !important;
-        color: #000000 !important;
+        color: #ffffff !important;
     }
-    .css-1o9w0hw {background: #eff6ff !important;}
-    .css-1330x6k {color: #000000 !important;}
+    .css-1o9w0hw {background: #000000 !important;}
+    .css-1330x6k {color: #ffffff !important;}
     </style>
     """,
     unsafe_allow_html=True
@@ -337,6 +372,7 @@ st.markdown(
 
 st.sidebar.title("📈 Compound")
 
+
 selected_calculator = st.sidebar.selectbox(
     "Select Calculator",
     list(CALCULATORS.keys())
@@ -348,18 +384,39 @@ st.title(selected_calculator)
 
 # Dictionary of major world currencies formatted as "Code (Name)":"Symbol"
 world_currencies = {
-    "USD (US Dollar)": "$", "EUR (Euro)": "€", "GBP (British Pound)": "£",
-    "JPY (Japanese Yen)": "¥", "INR (Indian Rupee)": "₹", "CNY (Chinese Yuan)": "¥",
+    "INR (Indian Rupee)": "₹", "EUR (Euro)": "€", "GBP (British Pound)": "£",
+    "JPY (Japanese Yen)": "¥", "USD (US Dollar)": "$", "CNY (Chinese Yuan)": "¥",
     "CAD (Canadian Dollar)": "$", "AUD (Australian Dollar)": "$", "CHF (Swiss Franc)": "CHF",
     "BRL (Brazilian Real)": "R$", "RUB (Russian Ruble)": "₽", "MXN (Mexican Peso)": "$"
 }
 
+world_currency_tax_rates = {
+    "USD (US Dollar)": 0.0,       # US has no federal VAT on loan fees
+    "EUR (Euro)": 0.0,            # Financial services are generally VAT-exempt in the EU
+    "GBP (British Pound)": 0.0,   # Bank charges/fees are VAT-exempt in the UK
+    "JPY (Japanese Yen)": 0.0,    # Financial operations are consumption tax-exempt
+    "INR (Indian Rupee)": 18.0,   # Standard 18% GST on banking service fees in India
+    "CNY (Chinese Yuan)": 6.0,     # Standard 6% VAT on financial services in China
+    "CAD (Canadian Dollar)": 0.0, # Core financial services are GST/HST exempt
+    "AUD (Australian Dollar)": 0.0,# Financial services are input-taxed (0% to customer)
+    "CHF (Swiss Franc)": 0.0,     # Financial turnovers are exempt from Swiss VAT
+    "BRL (Brazilian Real)": 5.0,  # Max Municipal Service Tax (ISS) on banking services
+    "RUB (Russian Ruble)": 0.0,   # Banking and financial services are VAT-exempt
+    "MXN (Mexican Peso)": 16.0    # Standard 16% IVA applies to non-exempt bank fees
+}
 
-currency_symbol = world_currencies[st.sidebar.selectbox(
+
+
+currency = st.sidebar.selectbox(
     "Select Curency",
     list(world_currencies.keys())
-)]
-ss.current_cs = currency_symbol
+)
+ss.current_cs = world_currencies[currency]
+open(TAX_FILE, 'w').write(str(world_currency_tax_rates[currency]))
+
+
+
+
 
 
 # ==================================================

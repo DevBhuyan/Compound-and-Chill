@@ -32,7 +32,7 @@ def calculate(principal: float,
     schedule = []
     opening_balance = principal
 
-    for month in range(1, tenure_months + 1):
+    for month in range(1, int(tenure_months) + 1):
         interest_paid = opening_balance * monthly_rate
 
         principal_paid = emi - interest_paid
@@ -53,7 +53,7 @@ def calculate(principal: float,
         })
 
         opening_balance = closing_balance
-        if opening_balance <= 0:
+        if opening_balance < 0.01:
             break
 
     return schedule

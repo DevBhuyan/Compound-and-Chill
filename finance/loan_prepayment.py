@@ -10,6 +10,8 @@ Created on Wed Jun 10 22:44:31 2026
 import math
 
 
+
+
 def calculate(remaining_principal: float,
               remaining_tenure_months: int,
               annual_roi: float,
@@ -18,15 +20,17 @@ def calculate(remaining_principal: float,
               tax_applicable: bool = True):
     """
     Calculates savings from a loan prepayment, evaluating both Tenure and EMI reduction options.
-    Factors in prepayment fees and 18% GST (India).
+    Factors in prepayment fees and applicable taxes.
 
     Returns:
     dict: A comparative analysis of both prepayment strategies.
     """
+    
 
     fee_decimal = prepayment_fee_percentage / 100
     raw_prepayment_fee = prepayment_amount * fee_decimal
-    gst_on_fee = (raw_prepayment_fee * 0.18) if tax_applicable else 0.0
+    tax_rate = float(open('./cur_tax_rate.txt').read())
+    gst_on_fee = (raw_prepayment_fee * tax_rate) if tax_applicable else 0.0
     total_prepayment_charges = raw_prepayment_fee + gst_on_fee
     total_cash_outflow = prepayment_amount + total_prepayment_charges
 
@@ -58,26 +62,34 @@ def calculate(remaining_principal: float,
             new_tenure_months = math.ceil(
                 math.log(log_numerator / log_denominator) / math.log(1 + monthly_rate))
 
-    strategy_a_total_payable = (
-        original_emi * new_tenure_months) + total_cash_outflow
-    strategy_a_interest_saved = original_total_payable - strategy_a_total_payable
+    # Option 1: Reduce tenure (EMI stays same)
+    strategy_a_emi_payments_total = original_emi * new_tenure_months
+    # Total interest to be paid after prepayment for option A = EMI payments - reduced principal
+    new_total_interest_a = strategy_a_emi_payments_total - new_principal
+    # Interest saved (before accounting prepayment charges)
+    interest_saved_before_charges_a = original_total_interest - new_total_interest_a
+    # Net savings after paying prepayment fees and GST
+    net_savings_a = interest_saved_before_charges_a - total_prepayment_charges
     tenure_saved_months = remaining_tenure_months - new_tenure_months
 
+    # Option 2: Reduce EMI (Tenure stays same)
     if monthly_rate == 0:
         new_emi = new_principal / remaining_tenure_months
     else:
         new_emi = (new_principal * monthly_rate * ((1 + monthly_rate) **
                    remaining_tenure_months)) / (((1 + monthly_rate) ** remaining_tenure_months) - 1)
 
-    strategy_b_total_payable = (
-        new_emi * remaining_tenure_months) + total_cash_outflow
-    strategy_b_interest_saved = original_total_payable - strategy_b_total_payable
+    strategy_b_emi_payments_total = new_emi * remaining_tenure_months
+    new_total_interest_b = strategy_b_emi_payments_total - new_principal
+    interest_saved_before_charges_b = original_total_interest - new_total_interest_b
+    net_savings_b = interest_saved_before_charges_b - total_prepayment_charges
     emi_reduction = original_emi - new_emi
+
 
     return {
         "Prepayment Charges Breakdown": {
             "Prepayment Fee": round(raw_prepayment_fee, 2),
-            "GST (18%)": round(gst_on_fee, 2),
+            f"GST ({tax_rate:.2f}%)": round(gst_on_fee, 2),
             "Total Charges Paid to Bank": round(total_prepayment_charges, 2),
             "Total Outflow from Pocket": round(total_cash_outflow, 2)
         },
@@ -88,12 +100,16 @@ def calculate(remaining_principal: float,
         "Option 1: Reduce Tenure (EMI stays same)": {
             "New Remaining Tenure": f"{new_tenure_months} months",
             "Tenure Saved": f"{tenure_saved_months} months",
-            "Net Money Saved": round(strategy_a_interest_saved, 2)
+            "Interest Saved (before charges)": round(interest_saved_before_charges_a, 2),
+            "Prepayment Charges": round(total_prepayment_charges, 2),
+            "Net Money Saved": round(net_savings_a, 2)
         },
         "Option 2: Reduce EMI (Tenure stays same)": {
             "New Lower EMI": round(new_emi, 2),
             "EMI Reduced By": round(emi_reduction, 2),
-            "Net Money Saved": round(strategy_b_interest_saved, 2)
+            "Interest Saved (before charges)": round(interest_saved_before_charges_b, 2),
+            "Prepayment Charges": round(total_prepayment_charges, 2),
+            "Net Money Saved": round(net_savings_b, 2)
         }
     }
 
